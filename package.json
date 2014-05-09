@@ -1,0 +1,10 @@
+{
+	"name": "simd",
+	"description": "SIMD library for the D programming language",
+	"homepage": "https://github.com/TurkeyMan/simd",
+	"authors": ["Manu Evans"],
+	"copyright": "Copyright (c) 2014 Manu Evans",
+	"license": "MIT",
+	"importPaths": ["."],
+	"targetType": "sourceLibrary"
+}
