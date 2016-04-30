@@ -1,14 +1,14 @@
-module std.simd;
+module std.experimental.simd;
 
-/*
+
 pure:
 nothrow:
+@nogc:
 @safe:
-*/
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Version mess
-///////////////////////////////////////////////////////////////////////////////
 
 version(X86)
 {
@@ -18,22 +18,22 @@ version(X86)
         version = X86_OR_X64;
 }
 else version(X86_64)
-{
     version = X86_OR_X64;
-}
 else version(PPC)
     version = PowerPC;
 else version(PPC64)
     version = PowerPC;
+else
+    version = NoSIMD;
 
 version(GNU)
     version = GNU_OR_LDC;
 version(LDC)
     version = GNU_OR_LDC;
 
+
 ///////////////////////////////////////////////////////////////////////////////
 // Platform specific imports
-///////////////////////////////////////////////////////////////////////////////
 
 version(DigitalMars)
 {
@@ -45,22 +45,12 @@ else version(GNU)
     import gcc.builtins;
 }
 
-version(GNU){} else
-{
-    struct attribute
-    {
-        string attrib;
-        string value;
-    }
-}
-
 public import core.simd;
 import std.traits, std.typetuple;
 
 
 ///////////////////////////////////////////////////////////////////////////////
 // Define available versions of vector hardware
-///////////////////////////////////////////////////////////////////////////////
 
 version(X86_OR_X64)
 {
@@ -168,249 +158,12 @@ else
     ];
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// LLVM instructions and intrinsics for LDC.
-///////////////////////////////////////////////////////////////////////////////
 
-version(LDC)
-{
-    template RepeatType(T, size_t n, R...)
-    {
-        static if(n == 0)
-            alias RepeatType = R;
-        else
-            alias RepeatType = RepeatType!(T, n - 1, T, R);
-    }
-
-    version(X86_OR_X64)
-        import ldc.gccbuiltins_x86;
-
-    import ldcsimd = ldc.simd;
-
-    alias PblendvbParam = byte16;
-}
-else version(GNU)
-{
-    alias PblendvbParam = ubyte16;
-}
-
-version(GNU)
-    version = GNU_OR_LDC;
-version(LDC)
-    version = GNU_OR_LDC;
-
-///////////////////////////////////////////////////////////////////////////////
-// Internal constants
-///////////////////////////////////////////////////////////////////////////////
-
-private
-{
-    enum ulong2 signMask2 = 0x8000_0000_0000_0000;
-    enum uint4 signMask4 = 0x8000_0000;
-    enum ushort8 signMask8 = 0x8000;
-    enum ubyte16 signMask16 = 0x80;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Internal functions
-///////////////////////////////////////////////////////////////////////////////
-
-// TODO: deprecated; moved to std.traits...
-enum bool isSIMDVector(T) = is(T : __vector(V[N]), V, size_t N);
-
+// TODO: should this go in core.simd? or even std.range?
 template ElementType(T : __vector(V[N]), V, size_t N) if(isSIMDVector!T)
 {
     alias Impl(T) = V;
     alias ElementType = std.traits.ModifyTypePreservingSTC!(Impl, OriginalType!T);
-}
-
-enum NumElements(T : __vector(V[N]), V, size_t N) = N;
-
-template PromotionOf(T)
-{
-    template Impl(T)
-    {
-        static if(is(T : __vector(V[N]), V, size_t N))
-            alias Impl = __vector(Impl!V[N/2]);
-        else static if(is(T == float))
-            alias Impl = double;
-        else static if(is(T == int))
-            alias Impl = long;
-        else static if(is(T == uint))
-            alias Impl = ulong;
-        else static if(is(T == short))
-            alias Impl = int;
-        else static if(is(T == ushort))
-            alias Impl = uint;
-        else static if(is(T == byte))
-            alias Impl = short;
-        else static if(is(T == ubyte))
-            alias Impl = ushort;
-        else
-            static assert(0, "Incorrect type: " ~ T.stringof);
-    }
-
-    alias PromotionOf = std.traits.ModifyTypePreservingSTC!(Impl, OriginalType!T);
-}
-template DemotionOf(T)
-{
-    template Impl(T)
-    {
-        static if(is(T : __vector(V[N]), V, size_t N))
-            alias Impl = __vector(Impl!V[N*2]);
-        else static if(is(T == double))
-            alias Impl = float;
-        else static if(is(T == long))
-            alias Impl = int;
-        else static if(is(T == ulong))
-            alias Impl = uint;
-        else static if(is(T == int))
-            alias Impl = short;
-        else static if(is(T == uint))
-            alias Impl = ushort;
-        else static if(is(T == short))
-            alias Impl = byte;
-        else static if(is(T == ushort))
-            alias Impl = ubyte;
-        else
-            static assert(0, "Incorrect type: " ~ T.stringof);
-    }
-
-    alias DemotionOf = std.traits.ModifyTypePreservingSTC!(Impl, OriginalType!T);
-}
-
-private
-{
-    enum bool isOfType(U, V) = is(Unqual!U == Unqual!V);
-
-    // pull the base type from a vector, array, or primitive
-    // type. The first version does not work for vectors.
-    template ArrayType(T : T[]) { alias T ArrayType; }
-    template ArrayType(T) if(isSIMDVector!T)
-    {
-        // typeof T.array.init does not work for some reason, so we use this
-        alias typeof(()
-        {
-            T a;
-            return a.array;
-        }()) ArrayType;
-    }
-    template BaseType(T)
-    {
-        static if(isSIMDVector!T)
-            alias ElementType!T BaseType;
-        else static if(isArray!T)
-            alias ArrayType!T BaseType;
-        else static if(isScalar!T)
-            alias T BaseType;
-        else
-            static assert(0, "Unsupported type");
-    }
-
-    template isScalarFloat(T)
-    {
-        alias U = Unqual!T;
-        enum bool isScalarFloat = is(U == float) || is(U == double);
-    }
-
-    template isScalarInt(T)
-    {
-        alias U = Unqual!T;
-        enum bool isScalarInt = is(U == long) || is(U == ulong) || is(U == int) || is(U == uint) || is(U == short) || is(U == ushort) || is(U == byte) || is(U == ubyte);
-    }
-
-    template isScalarUnsigned(T)
-    {
-        alias U = Unqual!T;
-        enum bool isScalarUnsigned = is(U == ulong) || is(U == uint) || is(U == ushort) || is(U == ubyte);
-    }
-
-    enum bool isScalar(T) = isScalarFloat!T || isScalarInt!T;
-    enum bool isFloatArray(T) = isArray!T && isScalarFloat!(BaseType!T);
-    enum bool isIntArray(T) = isArray!T && isScalarInt!(BaseType!T);
-    enum bool isFloatVector(T) = isSIMDVector!T && isScalarFloat(BaseType!T);
-    enum bool isIntVector(T) = isSIMDVector!T && isScalarInt(BaseType!T);
-    enum bool isSigned(T) = isScalarInt!(BaseType!T) && !isScalarUnsigned!(BaseType!T);
-    enum bool isUnsigned(T) = isScalarUnsigned!(BaseType!T);
-    enum bool is64bitElement(T) = BaseType!(T).sizeof == 8;
-    enum bool is64bitInteger(T) = is64bitElement!T && isScalarInt!(BaseType!T);
-    enum bool is32bitElement(T) = BaseType!(T).sizeof == 4;
-    enum bool is16bitElement(T) = BaseType!(T).sizeof == 2;
-    enum bool is8bitElement(T) = BaseType!(T).sizeof == 1;
-
-    /**** Templates for generating TypeTuples ****/
-
-    template staticIota(int start, int end, int stride = 1)
-    {
-        static if(start >= end)
-            alias staticIota = TypeTuple!();
-        else
-            alias staticIota = TypeTuple!(start, staticIota!(start + stride, end, stride));
-    }
-
-    template toTypeTuple(alias array, r...)
-    {
-        static if(array.length == r.length)
-            alias toTypeTuple = r;
-        else
-            alias toTypeTuple = toTypeTuple!(array, r, array[r.length]);
-    }
-
-    template interleaveTuples(a...)
-    {
-        static if(a.length == 0)
-            alias interleaveTuples = TypeTuple!();
-        else
-            alias interleaveTuples = TypeTuple!(a[0], a[$ / 2], interleaveTuples!(a[1 .. $ / 2], a[$ / 2 + 1 .. $]));
-    }
-
-    /**** And some helpers for various architectures ****/
-    version(X86_OR_X64)
-    {
-        template shufMask(elements...)
-        {
-            static if(elements.length == 2)
-                enum shufMask = ((elements[0] & 1) << 0) | ((elements[1] & 1) << 1);
-            else static if(elements.length == 4)
-                enum shufMask = ((elements[0] & 3) << 0) | ((elements[1] & 3) << 2) | ((elements[2] & 3) << 4) | ((elements[3] & 3) << 6);
-            else
-                static assert(0, "Incorrect number of elements");
-        }
-
-        template pshufbMask(alias elements)
-        {
-            template c(a...)
-            {
-                static if(a.length == 0)
-                    alias c = TypeTuple!();
-                else
-                    alias c = TypeTuple!(2 * a[0], 2 * a[0] + 1, c!(a[1 .. $]));
-            }
-
-            static if(elements.length == 16)
-                alias pshufbMask = toTypeTuple!elements;
-            else static if(elements.length == 8)
-                alias pshufbMask = c!(toTypeTuple!elements);
-            else
-                static assert(0, "Unsupported parameter length");
-        }
-    }
-
-    version(ARM)
-    {
-        template ARMOpType(T, bool Rounded = false)
-        {
-            // NOTE: 0-unsigned, 1-signed, 2-poly, 3-float, 4-unsigned rounded, 5-signed rounded
-            static if(isOfType!(T, double2) || isOfType!(T, float4))
-                enum uint ARMOpType = 3;
-            else static if(isOfType!(T, long2) || isOfType!(T, int4) || isOfType!(T, short8) || isOfType!(T, byte16))
-                enum uint ARMOpType = 1 + (Rounded ? 4 : 0);
-            else static if(isOfType!(T, ulong2) || isOfType!(T, uint4) || isOfType!(T, ushort8) || isOfType!(T, ubyte16))
-                enum uint ARMOpType = 0 + (Rounded ? 4 : 0);
-            else
-                static assert(0, "Incorrect type");
-        }
-    }
 }
 
 
@@ -1793,7 +1546,12 @@ template add(SIMDVer Ver = simdVer, T)
     @attribute("target", targetNames[Ver])
     T add(inout T v1, inout T v2)
     {
-        version(X86_OR_X64)
+        pragma(msg, T.stringof);
+        version(NoSIMD)
+        {
+            return (v1[]+v2[])[];
+        }
+        else version(X86_OR_X64)
         {
             return v1 + v2;
         }
@@ -4321,6 +4079,239 @@ T transpose(SIMDVer Ver = simdVer, T)(inout T m)
 
 // determinant, etc...
 
+
+///////////////////////////////////////////////////////////////////////////////
+// Private stuff...
+
+private:
+
+version(GNU){} else
+{
+    // GDC already declares this
+    struct attribute
+    {
+        string attrib;
+        string value;
+    }
+}
+
+// LLVM instructions and intrinsics for LDC.
+version(LDC)
+{
+    template RepeatType(T, size_t n, R...)
+    {
+        static if(n == 0)
+            alias RepeatType = R;
+        else
+            alias RepeatType = RepeatType!(T, n - 1, T, R);
+    }
+
+    version(X86_OR_X64)
+        import ldc.gccbuiltins_x86;
+
+    import ldcsimd = ldc.simd;
+
+    alias PblendvbParam = byte16;
+}
+else version(GNU)
+{
+    alias PblendvbParam = ubyte16;
+}
+
+
+// Internal constants
+enum ulong2 signMask2 = 0x8000_0000_0000_0000;
+enum uint4 signMask4 = 0x8000_0000;
+enum ushort8 signMask8 = 0x8000;
+enum ubyte16 signMask16 = 0x80;
+
+
+// Helper templates
+enum NumElements(T : __vector(V[N]), V, size_t N) = N;
+
+template PromotionOf(T)
+{
+    template Impl(T)
+    {
+        static if(is(T : __vector(V[N]), V, size_t N))
+            alias Impl = __vector(Impl!V[N/2]);
+        else static if(is(T == float))
+            alias Impl = double;
+        else static if(is(T == int))
+            alias Impl = long;
+        else static if(is(T == uint))
+            alias Impl = ulong;
+        else static if(is(T == short))
+            alias Impl = int;
+        else static if(is(T == ushort))
+            alias Impl = uint;
+        else static if(is(T == byte))
+            alias Impl = short;
+        else static if(is(T == ubyte))
+            alias Impl = ushort;
+        else
+            static assert(0, "Incorrect type: " ~ T.stringof);
+    }
+
+    alias PromotionOf = std.traits.ModifyTypePreservingSTC!(Impl, OriginalType!T);
+}
+template DemotionOf(T)
+{
+    template Impl(T)
+    {
+        static if(is(T : __vector(V[N]), V, size_t N))
+            alias Impl = __vector(Impl!V[N*2]);
+        else static if(is(T == double))
+            alias Impl = float;
+        else static if(is(T == long))
+            alias Impl = int;
+        else static if(is(T == ulong))
+            alias Impl = uint;
+        else static if(is(T == int))
+            alias Impl = short;
+        else static if(is(T == uint))
+            alias Impl = ushort;
+        else static if(is(T == short))
+            alias Impl = byte;
+        else static if(is(T == ushort))
+            alias Impl = ubyte;
+        else
+            static assert(0, "Incorrect type: " ~ T.stringof);
+    }
+
+    alias DemotionOf = std.traits.ModifyTypePreservingSTC!(Impl, OriginalType!T);
+}
+
+enum bool isOfType(U, V) = is(Unqual!U == Unqual!V);
+
+// pull the base type from a vector, array, or primitive
+// type. The first version does not work for vectors.
+template ArrayType(T : T[]) { alias T ArrayType; }
+template ArrayType(T) if(isSIMDVector!T)
+{
+    // typeof T.array.init does not work for some reason, so we use this
+    alias typeof(()
+    {
+        T a;
+        return a.array;
+    }()) ArrayType;
+}
+template BaseType(T)
+{
+    static if(isSIMDVector!T)
+        alias ElementType!T BaseType;
+    else static if(isArray!T)
+        alias ArrayType!T BaseType;
+    else static if(isScalar!T)
+        alias T BaseType;
+    else
+        static assert(0, "Unsupported type");
+}
+
+template isScalarFloat(T)
+{
+    alias U = Unqual!T;
+    enum bool isScalarFloat = is(U == float) || is(U == double);
+}
+
+template isScalarInt(T)
+{
+    alias U = Unqual!T;
+    enum bool isScalarInt = is(U == long) || is(U == ulong) || is(U == int) || is(U == uint) || is(U == short) || is(U == ushort) || is(U == byte) || is(U == ubyte);
+}
+
+template isScalarUnsigned(T)
+{
+    alias U = Unqual!T;
+    enum bool isScalarUnsigned = is(U == ulong) || is(U == uint) || is(U == ushort) || is(U == ubyte);
+}
+
+enum bool isScalar(T) = isScalarFloat!T || isScalarInt!T;
+enum bool isFloatArray(T) = isArray!T && isScalarFloat!(BaseType!T);
+enum bool isIntArray(T) = isArray!T && isScalarInt!(BaseType!T);
+enum bool isFloatVector(T) = isSIMDVector!T && isScalarFloat(BaseType!T);
+enum bool isIntVector(T) = isSIMDVector!T && isScalarInt(BaseType!T);
+enum bool isSigned(T) = isScalarInt!(BaseType!T) && !isScalarUnsigned!(BaseType!T);
+enum bool isUnsigned(T) = isScalarUnsigned!(BaseType!T);
+enum bool is64bitElement(T) = BaseType!(T).sizeof == 8;
+enum bool is64bitInteger(T) = is64bitElement!T && isScalarInt!(BaseType!T);
+enum bool is32bitElement(T) = BaseType!(T).sizeof == 4;
+enum bool is16bitElement(T) = BaseType!(T).sizeof == 2;
+enum bool is8bitElement(T) = BaseType!(T).sizeof == 1;
+
+
+// Templates for generating TypeTuples
+template staticIota(int start, int end, int stride = 1)
+{
+    static if(start >= end)
+        alias staticIota = TypeTuple!();
+    else
+        alias staticIota = TypeTuple!(start, staticIota!(start + stride, end, stride));
+}
+
+template toTypeTuple(alias array, r...)
+{
+    static if(array.length == r.length)
+        alias toTypeTuple = r;
+    else
+        alias toTypeTuple = toTypeTuple!(array, r, array[r.length]);
+}
+
+template interleaveTuples(a...)
+{
+    static if(a.length == 0)
+        alias interleaveTuples = TypeTuple!();
+    else
+        alias interleaveTuples = TypeTuple!(a[0], a[$ / 2], interleaveTuples!(a[1 .. $ / 2], a[$ / 2 + 1 .. $]));
+}
+
+// Some helpers for various architectures
+version(X86_OR_X64)
+{
+    template shufMask(elements...)
+    {
+        static if(elements.length == 2)
+            enum shufMask = ((elements[0] & 1) << 0) | ((elements[1] & 1) << 1);
+        else static if(elements.length == 4)
+            enum shufMask = ((elements[0] & 3) << 0) | ((elements[1] & 3) << 2) | ((elements[2] & 3) << 4) | ((elements[3] & 3) << 6);
+        else
+            static assert(0, "Incorrect number of elements");
+    }
+
+    template pshufbMask(alias elements)
+    {
+        template c(a...)
+        {
+            static if(a.length == 0)
+                alias c = TypeTuple!();
+            else
+                alias c = TypeTuple!(2 * a[0], 2 * a[0] + 1, c!(a[1 .. $]));
+        }
+
+        static if(elements.length == 16)
+            alias pshufbMask = toTypeTuple!elements;
+        else static if(elements.length == 8)
+            alias pshufbMask = c!(toTypeTuple!elements);
+        else
+            static assert(0, "Unsupported parameter length");
+    }
+}
+
+version(ARM)
+{
+    template ARMOpType(T, bool Rounded = false)
+    {
+        // NOTE: 0-unsigned, 1-signed, 2-poly, 3-float, 4-unsigned rounded, 5-signed rounded
+        static if(isOfType!(T, double2) || isOfType!(T, float4))
+            enum uint ARMOpType = 3;
+        else static if(isOfType!(T, long2) || isOfType!(T, int4) || isOfType!(T, short8) || isOfType!(T, byte16))
+            enum uint ARMOpType = 1 + (Rounded ? 4 : 0);
+        else static if(isOfType!(T, ulong2) || isOfType!(T, uint4) || isOfType!(T, ushort8) || isOfType!(T, ubyte16))
+            enum uint ARMOpType = 0 + (Rounded ? 4 : 0);
+        else
+            static assert(0, "Incorrect type");
+    }
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////
